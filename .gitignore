@@ -1,0 +1,30 @@
+# Unity 生成物
+src/[Ll]ibrary/
+src/[Tt]emp/
+src/[Oo]bj/
+src/[Bb]uild/
+src/[Bb]uilds/
+src/[Ll]ogs/
+src/[Uu]ser[Ss]ettings/
+src/[Mm]emoryCaptures/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# OS
+.DS_Store
+Thumbs.db
