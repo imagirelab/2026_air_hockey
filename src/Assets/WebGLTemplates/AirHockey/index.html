@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a0e07">
+  <title>ウッド・エアホッケー</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: #1a0e07; overflow: hidden;
+      overscroll-behavior: none; -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+      font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+      color: #fff0d6;
+    }
+    #unity-canvas {
+      position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+      display: block; background: #1a0e07; touch-action: none; outline: none;
+    }
+    #overlay {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 28px; padding: 24px; box-sizing: border-box;
+      background: radial-gradient(ellipse at 50% 35%, #6b3d1c 0%, #2b170b 60%, #1a0e07 100%);
+      text-align: center; z-index: 10;
+    }
+    #overlay h1 { margin: 0; font-size: clamp(30px, 8vw, 64px); letter-spacing: 0.08em; text-shadow: 0 3px 0 #3a1e0c; }
+    #overlay p { margin: 0; font-size: clamp(14px, 3.6vw, 20px); line-height: 1.8; opacity: 0.85; }
+    #play {
+      font: inherit; font-size: clamp(20px, 5.5vw, 30px); font-weight: bold; color: #2b170b;
+      background: linear-gradient(#ffd28a, #f0a94a); border: none; border-radius: 999px;
+      padding: 16px 52px; box-shadow: 0 6px 0 #8a4f1c, 0 10px 24px rgba(0,0,0,0.5); cursor: pointer;
+    }
+    #play:active { transform: translateY(4px); box-shadow: 0 2px 0 #8a4f1c, 0 4px 12px rgba(0,0,0,0.5); }
+    #progress { display: none; width: min(70vw, 360px); height: 12px; border-radius: 6px; background: rgba(0,0,0,0.4); overflow: hidden; }
+    #bar { width: 0%; height: 100%; background: linear-gradient(90deg, #f0a94a, #ffd28a); transition: width 0.2s; }
+    #status { min-height: 1.5em; }
+    #warning { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 20; display: none;
+      background: rgba(0,0,0,0.75); padding: 8px 14px; border-radius: 8px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <canvas id="unity-canvas" tabindex="-1"></canvas>
+  <div id="overlay">
+    <h1>ウッド・エアホッケー</h1>
+    <p>NPCと対戦！5点先取で勝利<br>スマホは画面をフリック、PCはマウスで操作</p>
+    <button id="play">タップしてプレイ</button>
+    <div id="progress"><div id="bar"></div></div>
+    <p id="status"></p>
+  </div>
+  <div id="warning"></div>
+  <script>
+    var canvas = document.querySelector("#unity-canvas");
+    var overlay = document.querySelector("#overlay");
+    var playButton = document.querySelector("#play");
+    var progress = document.querySelector("#progress");
+    var bar = document.querySelector("#bar");
+    var statusText = document.querySelector("#status");
+
+    function showBanner(msg, type) {
+      if (type !== "error") { console.log(msg); return; }
+      var w = document.querySelector("#warning");
+      w.textContent = msg; w.style.display = "block";
+    }
+
+    // スクロールやピンチ拡大でゲームが動かないようにする
+    document.addEventListener("touchmove", function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener("gesturestart", function (e) { e.preventDefault(); });
+
+    var buildUrl = "Build";
+    var config = {
+      arguments: [],
+      dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+      frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+#if USE_THREADS
+      workerUrl: buildUrl + "/{{{ WORKER_FILENAME }}}",
+#endif
+#if USE_WASM
+      codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+#endif
+#if SYMBOLS_FILENAME
+      symbolsUrl: buildUrl + "/{{{ SYMBOLS_FILENAME }}}",
+#endif
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+      productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+      productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+      showBanner: showBanner,
+      // スマートフォンでは描画解像度を抑えて軽くする
+      devicePixelRatio: Math.min(window.devicePixelRatio || 1, /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? 1.5 : 2),
+    };
+
+    function start() {
+      playButton.style.display = "none";
+      progress.style.display = "block";
+      statusText.textContent = "読み込み中…";
+      var script = document.createElement("script");
+      script.src = buildUrl + "/{{{ LOADER_FILENAME }}}";
+      script.onload = function () {
+        createUnityInstance(canvas, config, function (p) {
+          bar.style.width = (100 * p) + "%";
+        }).then(function () {
+          overlay.style.display = "none";
+          canvas.focus();
+        }).catch(function (message) {
+          statusText.textContent = "起動できませんでした: " + message;
+        });
+      };
+      document.body.appendChild(script);
+    }
+    playButton.addEventListener("click", start);
+  </script>
+</body>
+</html>

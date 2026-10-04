@@ -9,6 +9,10 @@ namespace AirHockey
         public Mallet follow;
         public Vector3 basePos = new Vector3(0f, 1.42f, -1.72f);
         public Vector3 lookAt = new Vector3(0f, 0.72f, -0.05f);
+        [Header("縦画面（スマートフォン）用の視点")]
+        public Vector3 portraitPos = new Vector3(0f, 2.3f, -1.75f);
+        public Vector3 portraitLookAt = new Vector3(0f, 0.6f, 0.15f);
+        public float portraitFov = 82f;
 
         float shake;
         float fovKick;
@@ -27,13 +31,16 @@ namespace AirHockey
 
         void LateUpdate()
         {
-            Vector3 pos = basePos;
+            // 画面が縦長になるほど、高く引いた見下ろし視点へ寄せてテーブル全体を収める
+            float portrait = cam ? Mathf.InverseLerp(1.2f, 0.5f, cam.aspect) : 0f;
+            Vector3 pos = Vector3.Lerp(basePos, portraitPos, portrait);
+            float sway = Mathf.Lerp(1f, 0.4f, portrait);
             if (follow)
             {
-                pos.x += follow.pos.x * 0.18f;
-                pos.z += (follow.pos.y + 0.8f) * 0.06f;
+                pos.x += follow.pos.x * 0.18f * sway;
+                pos.z += (follow.pos.y + 0.8f) * 0.06f * sway;
             }
-            Vector3 look = lookAt + new Vector3(follow ? follow.pos.x * 0.1f : 0f, 0f, 0f);
+            Vector3 look = Vector3.Lerp(lookAt, portraitLookAt, portrait) + new Vector3(follow ? follow.pos.x * 0.1f * sway : 0f, 0f, 0f);
             float t = Time.unscaledTime;
             pos.y += Mathf.Sin(t * 1.1f) * 0.004f; // 呼吸のような微かな揺れ
             Vector3 shakeOffset = Vector3.zero;
@@ -48,7 +55,7 @@ namespace AirHockey
             transform.rotation = Quaternion.LookRotation(look - smooth);
             if (cam)
             {
-                cam.fieldOfView = baseFov + fovKick;
+                cam.fieldOfView = Mathf.Lerp(baseFov, portraitFov, portrait) + fovKick;
                 fovKick = Mathf.MoveTowards(fovKick, 0f, Time.unscaledDeltaTime * 12f);
             }
         }

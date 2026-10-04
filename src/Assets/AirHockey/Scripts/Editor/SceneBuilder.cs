@@ -58,8 +58,9 @@ namespace AirHockey.EditorTools
             // センターライン・サークル・ゴールエリア
             Box("CenterLine", table, new Vector3(0, Y - 0.0055f, 0), new Vector3(W * 2, 0.001f, 0.012f), mLine);
             Ring("CenterCircle", table, Vector3.up * (Y - 0.0055f), 0.2f, 0.008f, mLine);
-            Ring("GoalArcP", table, new Vector3(0, Y - 0.0055f, -L), 0.28f, 0.008f, mLine);
-            Ring("GoalArcA", table, new Vector3(0, Y - 0.0055f, L), 0.28f, 0.008f, mLine);
+            // ゴールエリアはテーブル内側の半円だけ描く
+            Ring("GoalArcP", table, new Vector3(0, Y - 0.0055f, -L), 0.28f, 0.008f, mLine, 0f, 180f);
+            Ring("GoalArcA", table, new Vector3(0, Y - 0.0055f, L), 0.28f, 0.008f, mLine, 180f, 360f);
             foreach (var p in new[] { new Vector2(-1, -1), new Vector2(1, -1), new Vector2(-1, 1), new Vector2(1, 1) })
                 Box("Leg", table, new Vector3(p.x * (W - 0.02f), (Y - 0.16f) * 0.5f, p.y * (L - 0.05f)), new Vector3(0.1f, Y - 0.16f, 0.1f), mFrame);
 
@@ -237,7 +238,7 @@ namespace AirHockey.EditorTools
             return go;
         }
 
-        static void Ring(string name, GameObject parent, Vector3 center, float radius, float width, Material m)
+        static void Ring(string name, GameObject parent, Vector3 center, float radius, float width, Material m, float fromDeg = 0f, float toDeg = 360f)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent.transform, false);
@@ -247,7 +248,7 @@ namespace AirHockey.EditorTools
             var tris = new int[seg * 6];
             for (int i = 0; i <= seg; i++)
             {
-                float a = i / (float)seg * Mathf.PI * 2f;
+                float a = Mathf.Lerp(fromDeg, toDeg, i / (float)seg) * Mathf.Deg2Rad;
                 var d = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
                 verts[i * 2] = d * (radius - width * 0.5f);
                 verts[i * 2 + 1] = d * (radius + width * 0.5f);

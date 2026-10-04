@@ -7,6 +7,7 @@ namespace AirHockey
     public class HockeyUI : MonoBehaviour
     {
         Text scoreText, messageText, hintText, subText;
+        CanvasScaler scaler;
         Image flash;
         float msgTimer, msgDuration, msgPop;
         Color flashColor;
@@ -17,12 +18,14 @@ namespace AirHockey
 
         void Awake()
         {
-            font = Font.CreateDynamicFontFromOSFont(new[] { "Yu Gothic UI", "Meiryo UI", "Meiryo", "MS Gothic" }, 64);
+            // WebGLではOSのフォントを使えないため、同梱の日本語フォントを使う
+            font = Resources.Load<Font>("GameFont");
+            if (!font) font = Font.CreateDynamicFontFromOSFont(new[] { "Yu Gothic UI", "Meiryo UI", "Meiryo", "MS Gothic" }, 64);
             var canvasGo = new GameObject("HUD", typeof(Canvas), typeof(CanvasScaler));
             canvasGo.transform.SetParent(transform, false);
             var canvas = canvasGo.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler = canvasGo.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
             scaler.matchWidthOrHeight = 0.5f;
@@ -38,7 +41,7 @@ namespace AirHockey
             subText.text = $"{HockeyConfig.WinScore}点先取で勝利";
             messageText = MakeText(canvasGo.transform, "Message", 150, new Vector2(0.5f, 0.5f), new Vector2(0, 120), Cream);
             hintText = MakeText(canvasGo.transform, "Hint", 28, new Vector2(0.5f, 0f), new Vector2(0, 50), new Color(1f, 1f, 1f, 0.7f));
-            hintText.text = "マウスでマレットを動かしてパックを打ち返そう";
+            hintText.text = PlayHint;
             UpdateScore();
         }
 
@@ -80,6 +83,11 @@ namespace AirHockey
             return t;
         }
 
+        static string PlayHint =>
+            GameManager.AutoPlay ? (GameManager.IsTouchDevice ? "オートプレイ：AI同士が自動で対戦中" : "オートプレイ：AI同士が自動で対戦中（Tabで切替）")
+            : GameManager.IsTouchDevice ? "画面をフリックしてマレットを動かそう"
+            : "マウスでマレットを動かしてパックを打ち返そう（Tabで自動対戦）";
+
         static void Stretch(RectTransform rt)
         {
             rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
@@ -106,7 +114,7 @@ namespace AirHockey
         void OnStart()
         {
             UpdateScore();
-            hintText.text = "マウスでマレットを動かしてパックを打ち返そう";
+            hintText.text = PlayHint;
             subText.text = $"{HockeyConfig.WinScore}点先取で勝利";
         }
 
@@ -130,13 +138,20 @@ namespace AirHockey
         {
             ShowMessage(playerWon ? "あなたの勝ち！" : "NPCの勝ち…", playerWon ? Amber : new Color(0.75f, 0.85f, 1f), 9999f, 2.5f);
             subText.text = playerWon ? "おめでとうございます！" : "もう一度挑戦しよう";
-            hintText.text = "クリックでもう一度対戦";
+            hintText.text = GameManager.AutoPlay ? "オートプレイ：まもなく次の試合" : GameManager.IsTouchDevice ? "タップでもう一度対戦" : "クリックでもう一度対戦";
             Flash(playerWon ? new Color(1f, 0.85f, 0.4f, 0.6f) : new Color(0.2f, 0.3f, 0.6f, 0.4f));
         }
 
         void Update()
         {
             float dt = Time.unscaledDeltaTime;
+            var gm = GameManager.Instance;
+            if (gm && gm.Phase != Phase.GameOver) hintText.text = PlayHint;
+
+            // 縦長の画面（スマートフォン）では縦向きの基準解像度で横幅に合わせる
+            bool portrait = Screen.height > Screen.width;
+            scaler.referenceResolution = portrait ? new Vector2(1080, 1920) : new Vector2(1920, 1080);
+            scaler.matchWidthOrHeight = portrait ? 0f : 0.5f;
             if (msgTimer > 0f)
             {
                 msgTimer -= dt;

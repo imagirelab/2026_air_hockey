@@ -16,6 +16,8 @@ namespace AirHockey
         public Mallet ai;
         public Puck puck;
         public Camera cam;
+        [Tooltip("オンにするとプレイヤー側もAIが操作する（AI同士の自動対戦）。プレイ中はTabキーで切り替え可能")]
+        public bool autoPlay;
 
         public int PlayerScore { get; private set; }
         public int AIScore { get; private set; }
@@ -24,6 +26,8 @@ namespace AirHockey
         /// <summary>試合の盛り上がり度 0..1。得点が進むほど上がる。</summary>
         public float Intensity => Mathf.Clamp01((PlayerScore + AIScore) / (float)(HockeyConfig.WinScore * 2 - 2));
         public bool MatchPoint => Mathf.Max(PlayerScore, AIScore) == HockeyConfig.WinScore - 1;
+        /// <summary>現在のラリーの経過秒（ゲーム時間）</summary>
+        public float RallyTime { get; private set; }
 
         public static event Action<Vector3, float> PuckHit;   // 位置, 強さ0..1
         public static event Action<Vector3, float> WallHit;
@@ -32,14 +36,32 @@ namespace AirHockey
         public static event Action<string> Countdown;         // 表示テキスト
         public static event Action MatchStarted;
 
-        AIController brain;
+        /// <summary>trueならプレイヤー側もAIが操作する（デモ・録画用）</summary>
+        public static bool AutoPlay;
+        /// <summary>試合終了後、自動で次の試合を始めるか</summary>
+        public static bool AutoRestart = true;
+
+        AIController brain, playerBrain;
+
+        /// <summary>スマートフォンなどタッチ操作の端末か</summary>
+        public static bool IsTouchDevice => Application.isMobilePlatform || (Touchscreen.current != null && Mouse.current == null);
+        // フリック操作：指の移動量をテーブル上の移動量に換算する倍率（画面の短辺をなぞるとテーブル幅の何倍動くか）
+        const float TouchGain = 1.6f;
+        bool touching;
+        Vector2 lastTouch, flickVel;
         float hitCooldown, wallCooldown;
 
         void Awake()
         {
             Instance = this;
+            if (autoPlay) AutoPlay = true;
             brain = new AIController(ai);
+            playerBrain = new AIController(player);
+#if UNITY_WEBGL && !UNITY_EDITOR
+            Application.targetFrameRate = -1; // ブラウザの描画タイミングに合わせる
+#else
             Application.targetFrameRate = 120;
+#endif
         }
 
         void Start() => StartCoroutine(MatchRoutine());
@@ -55,10 +77,11 @@ namespace AirHockey
                 yield return Serve(serveToPlayer, first);
                 first = false;
                 Phase = Phase.Playing;
+                RallyTime = 0f;
                 while (Phase == Phase.Playing) yield return null;
 
                 // ゴール後の余韻
-                yield return new WaitForSecondsRealtime(MatchPoint || IsOver ? 2.2f : 1.6f);
+                yield return Wait(MatchPoint || IsOver ? 2.2f : 1.6f);
                 Time.timeScale = 1f;
                 if (IsOver) break;
                 serveToPlayer = lastGoalByPlayer == false; // 失点した側からサーブ
@@ -67,9 +90,22 @@ namespace AirHockey
             Phase = Phase.GameOver;
             Cursor.visible = true;
             MatchEnded?.Invoke(PlayerScore > AIScore);
-            yield return new WaitForSecondsRealtime(1.5f);
-            while (!(Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)) yield return null;
+            yield return Wait(1.5f);
+            if (AutoPlay)
+            {
+                if (!AutoRestart) yield break;
+                yield return Wait(4f);
+            }
+            else
+                while (!(Pointer.current != null && Pointer.current.press.wasPressedThisFrame)) yield return null; // クリックまたはタップ
             StartCoroutine(MatchRoutine());
+        }
+
+        // 録画時は固定フレームレートで時間が進むため、実時間ではなくunscaledTimeで待つ
+        static IEnumerator Wait(float seconds)
+        {
+            float end = Time.unscaledTime + seconds;
+            while (Time.unscaledTime < end) yield return null;
         }
 
         bool IsOver => PlayerScore >= HockeyConfig.WinScore || AIScore >= HockeyConfig.WinScore;
@@ -88,14 +124,14 @@ namespace AirHockey
                 foreach (var s in new[] { "3", "2", "1" })
                 {
                     Countdown?.Invoke(s);
-                    yield return new WaitForSecondsRealtime(0.75f);
+                    yield return Wait(0.75f);
                 }
                 Countdown?.Invoke("スタート！");
             }
             else
             {
                 Countdown?.Invoke(MatchPoint ? "マッチポイント！" : "レディ…");
-                yield return new WaitForSecondsRealtime(1.0f);
+                yield return Wait(1.0f);
                 Countdown?.Invoke("ゴー！");
             }
         }
@@ -105,8 +141,19 @@ namespace AirHockey
             float dt = Mathf.Min(Time.deltaTime, 1f / 30f);
             if (dt <= 0f) return;
 
-            // プレイヤー入力：マウス位置をテーブル平面に投影
-            if (Mouse.current != null && cam)
+            if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame) AutoPlay = !AutoPlay;
+
+            // プレイヤー入力：自動対戦ならAI、そうでなければマウス位置をテーブル平面に投影
+            if (AutoPlay)
+            {
+                if (Phase == Phase.Playing) playerBrain.Tick(puck, dt, Mathf.Lerp(0.3f, 0.6f, Intensity), RallyTime);
+                else player.target = new Vector2(0f, -HockeyConfig.HalfLength + 0.25f);
+            }
+            else if (IsTouchDevice || (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed))
+            {
+                TouchInput(dt);
+            }
+            else if (Mouse.current != null && cam)
             {
                 Ray ray = cam.ScreenPointToRay(Mouse.current.position.ReadValue());
                 Plane plane = new Plane(Vector3.up, new Vector3(0f, HockeyConfig.TableY, 0f));
@@ -117,18 +164,55 @@ namespace AirHockey
                 }
             }
 
-            if (Phase == Phase.Playing) brain.Tick(puck, dt, Mathf.Lerp(0.35f, 0.9f, Intensity));
+            if (Phase == Phase.Playing) brain.Tick(puck, dt, Mathf.Lerp(0.25f, 0.6f, Intensity), RallyTime);
             else if (Phase != Phase.Goal) ai.target = new Vector2(0f, HockeyConfig.HalfLength - 0.2f);
 
             player.Step(dt);
             ai.Step(dt);
 
-            if (Phase == Phase.Playing) Simulate(dt);
+            if (Phase == Phase.Playing) { Simulate(dt); RallyTime += dt; }
             else if (Phase == Phase.Goal) AnimateGoalDrop(dt);
             puck.Apply(dt);
 
             hitCooldown -= dt;
             wallCooldown -= dt;
+        }
+
+        /// <summary>
+        /// フリック操作。指を置いた位置に関係なく、指の移動量だけマレットを動かす（指でマレットが隠れない）。
+        /// 指を離すとフリックの勢いで少しだけ滑る。
+        /// </summary>
+        void TouchInput(float dt)
+        {
+            var ts = Touchscreen.current;
+            if (ts == null) return;
+            var touch = ts.primaryTouch;
+            if (touch.press.isPressed)
+            {
+                Vector2 sp = touch.position.ReadValue();
+                if (!touching)
+                {
+                    touching = true;
+                    lastTouch = sp;
+                    flickVel = Vector2.zero;
+                    player.target = player.pos;
+                }
+                Vector2 d = sp - lastTouch;
+                lastTouch = sp;
+                float scale = TouchGain * (HockeyConfig.HalfWidth * 2f) / Mathf.Max(1, Mathf.Min(Screen.width, Screen.height));
+                Vector2 move = d * scale; // 画面の上方向＝テーブルの奥方向
+                player.target = player.Clamp(player.target + move);
+                flickVel = Vector2.Lerp(flickVel, move / dt, 0.5f);
+            }
+            else
+            {
+                touching = false;
+                if (flickVel.sqrMagnitude > 0.01f)
+                {
+                    player.target = player.Clamp(player.target + flickVel * dt);
+                    flickVel *= Mathf.Exp(-dt * 8f);
+                }
+            }
         }
 
         void Simulate(float dt)
@@ -145,6 +229,11 @@ namespace AirHockey
             }
             // エアテーブルのわずかな減速
             puck.vel *= 1f - 0.12f * dt;
+
+            // 隅に挟まって止まったパックは、空気の流れで中央へ少しずつ押し出す
+            Vector2 p = puck.pos;
+            if (Mathf.Abs(p.x) > HockeyConfig.HalfWidth - 0.14f && Mathf.Abs(p.y) > HockeyConfig.HalfLength - 0.14f && puck.vel.magnitude < 1.5f)
+                puck.vel += new Vector2(-Mathf.Sign(p.x) * 0.8f, -Mathf.Sign(p.y) * 1.6f) * dt;
         }
 
         void Collide(Vector2 mp, Vector2 mv)

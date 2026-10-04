@@ -16,6 +16,8 @@ namespace AirHockey
         float[] layerTarget;
         AudioSource sfx;
         float duck = 1f;
+        float[] mixVolume;
+        double[] mixPhase;
 
         void Awake()
         {
@@ -45,6 +47,8 @@ namespace AirHockey
             };
             layers = new AudioSource[clips.Length];
             layerTarget = new float[clips.Length];
+            mixVolume = new float[clips.Length];
+            mixPhase = new double[clips.Length];
             double start = AudioSettings.dspTime + 0.2;
             for (int i = 0; i < clips.Length; i++)
             {
@@ -52,7 +56,11 @@ namespace AirHockey
                 src.clip = clips[i];
                 src.loop = true;
                 src.volume = 0f;
+#if UNITY_WEBGL && !UNITY_EDITOR
+                src.Play(); // ブラウザでは予約再生を使わず、同じフレームで一斉に再生して同期させる
+#else
                 src.PlayScheduled(start);
+#endif
                 layers[i] = src;
             }
         }
@@ -90,41 +98,56 @@ namespace AirHockey
             for (int i = 0; i < layers.Length; i++)
             {
                 float target = layerTarget[i] * duck * (over ? 0.4f : 1f);
+                float pitch = Time.timeScale < 0.9f ? 0.85f : 1f;
+                if (OfflineMix.Active)
+                {
+                    // 録画中：実際の再生は止め、ゲーム時間に合わせてミックスバッファへ書き込む
+                    layers[i].volume = 0f;
+                    float next = Mathf.MoveTowards(mixVolume[i], target, OfflineMix.FrameSeconds * 0.4f);
+                    mixPhase[i] = OfflineMix.Loop(layers[i].clip, mixPhase[i], OfflineMix.FrameSamples, mixVolume[i], next, pitch);
+                    mixVolume[i] = next;
+                    continue;
+                }
                 layers[i].volume = Mathf.MoveTowards(layers[i].volume, target, Time.unscaledDeltaTime * 0.4f);
-                layers[i].pitch = Time.timeScale < 0.9f ? 0.85f : 1f;
+                layers[i].pitch = pitch;
             }
         }
 
         void OnHit(Vector3 pos, float s)
         {
             float k = GameManager.Instance ? GameManager.Instance.Intensity : 0f;
-            AudioSource.PlayClipAtPoint(knock, pos, Mathf.Lerp(0.4f, 1f, s));
-            sfx.pitch = Random.Range(0.92f, 1.08f) * Mathf.Lerp(1.1f, 0.85f, s);
-            if (s > 0.5f && k > 0.3f) sfx.PlayOneShot(wall, s * k); // 強打は重低音を重ねる
+            Play(knock, Mathf.Lerp(0.4f, 1f, s), pos, Random.Range(0.92f, 1.08f) * Mathf.Lerp(1.1f, 0.85f, s));
+            if (s > 0.5f && k > 0.3f) Play(wall, s * k); // 強打は重低音を重ねる
         }
 
-        void OnWall(Vector3 pos, float s) => AudioSource.PlayClipAtPoint(wall, pos, Mathf.Lerp(0.3f, 0.9f, s));
+        void OnWall(Vector3 pos, float s) => Play(wall, Mathf.Lerp(0.3f, 0.9f, s), pos);
 
         void OnCountdown(string s)
         {
-            sfx.pitch = 1f;
-            sfx.PlayOneShot(s.EndsWith("！") ? beepHi : beep, 0.8f);
+            Play(s.EndsWith("！") ? beepHi : beep, 0.8f);
         }
 
         void OnGoal(bool byPlayer)
         {
             float k = GameManager.Instance.Intensity;
-            sfx.pitch = 1f;
-            sfx.PlayOneShot(byPlayer ? goalUp : goalDown, 0.9f);
-            if (byPlayer) sfx.PlayOneShot(cheer, Mathf.Lerp(0.25f, 1f, k));
+            Play(byPlayer ? goalUp : goalDown, 0.9f);
+            if (byPlayer) Play(cheer, Mathf.Lerp(0.25f, 1f, k));
             duck = 0.3f;
         }
 
         void OnEnd(bool won)
         {
-            sfx.pitch = 1f;
-            sfx.PlayOneShot(won ? fanfare : groan, 1f);
-            if (won) sfx.PlayOneShot(cheer, 1f);
+            Play(won ? fanfare : groan, 1f);
+            if (won) Play(cheer, 1f);
+        }
+
+        /// <summary>効果音を鳴らす。録画中はオフラインミキサーへ送る。</summary>
+        void Play(AudioClip clip, float volume, Vector3? at = null, float pitch = 1f)
+        {
+            if (OfflineMix.Active) { OfflineMix.Play(clip, volume * (at.HasValue ? 0.8f : 1f), pitch); return; }
+            if (at.HasValue && pitch == 1f) { AudioSource.PlayClipAtPoint(clip, at.Value, volume); return; }
+            sfx.pitch = pitch;
+            sfx.PlayOneShot(clip, volume);
         }
 
         // ---------- 合成ユーティリティ ----------
@@ -233,6 +256,7 @@ namespace AirHockey
             for (int i = 0; i < n; i++) data[i] = Mathf.Clamp(fn(i / (float)Rate), -1f, 1f);
             var clip = AudioClip.Create(name, n, 1, Rate, false);
             clip.SetData(data, 0);
+            OfflineMix.Register(clip, data);
             return clip;
         }
     }

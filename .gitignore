@@ -28,3 +28,9 @@ src/[Mm]emoryCaptures/
 # OS
 .DS_Store
 Thumbs.db
+
+# 録画出力
+Recordings/
+
+# WebGLビルド時にBurstが生成する中間ファイル
+src/Data/
